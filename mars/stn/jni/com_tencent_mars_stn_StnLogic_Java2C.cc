@@ -31,7 +31,7 @@
 #include "mars/comm/jni/util/comm_function.h"
 #include "mars/comm/jni/util/var_cache.h"
 #include "mars/comm/jni/util/scoped_jstring.h"
-#include "mars/log/appender.h"
+//#include "mars/log/appender.h"
 #include "mars/stn/stn_logic.h"
 
 #include "stn/src/net_core.h"
@@ -179,9 +179,11 @@ JNIEXPORT void JNICALL Java_com_tencent_mars_stn_StnLogic_startTask
 	jint total_timetout = JNU_GetField(_env, _task, "totalTimeout", "I").i;
 	jstring report_arg = (jstring)JNU_GetField(_env, _task, "reportArg", "Ljava/lang/String;").l;
 
+	jobject oHeaders = JNU_GetField(_env, _task, "headers", "Ljava/util/Map;").l;
+	std::map<std::string, std::string> headers = JNU_JObject2Map(_env, oHeaders);
+
 	//init struct Task
-	struct Task task;
-	task.taskid = taskid;
+	struct Task task(taskid);
 	task.cmdid = cmdid;
 	task.channel_select = channel_select;
 
@@ -197,6 +199,7 @@ JNIEXPORT void JNICALL Java_com_tencent_mars_stn_StnLogic_startTask
 	task.retry_count = retrycount;
 	task.server_process_cost = server_process_cost;
 	task.total_timetout = total_timetout;
+	task.headers = headers;
 
 	if (NULL != report_arg) {
 		task.report_arg = ScopedJstring(_env, report_arg).GetChar();
@@ -221,6 +224,12 @@ JNIEXPORT void JNICALL Java_com_tencent_mars_stn_StnLogic_startTask
 	if (NULL != cgi) {
 		task.cgi = ScopedJstring(_env, cgi).GetChar();
 		_env->DeleteLocalRef(cgi);
+	}
+
+	jobject _user_context = JNU_GetField(_env, _task, "userContext", "Ljava/lang/Object;").l;
+	if (NULL != _user_context) {
+		task.user_context = _env->NewGlobalRef(_user_context);
+		_env->DeleteLocalRef(_user_context);
 	}
 
 	StartTask(task);

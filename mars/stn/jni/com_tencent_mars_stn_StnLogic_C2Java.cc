@@ -17,7 +17,6 @@
 
 #include <jni.h>
 #include <vector>
-#include <sstream>
 
 #include "mars/comm/autobuffer.h"
 #include "mars/comm/xlogger/xlogger.h"
@@ -29,14 +28,19 @@
 #include "mars/comm/platform_comm.h"
 #include "mars/stn/stn.h"
 #include "mars/stn/task_profile.h"
+#include "mars/boost/signals2.hpp"
 
 DEFINE_FIND_CLASS(KC2Java, "com/tencent/mars/stn/StnLogic")
 
 namespace mars {
 namespace stn {
 
+extern boost::signals2::signal<void (ErrCmdType _err_type, int _err_code, const std::string& _ip, uint16_t _port)> SignalOnLongLinkNetworkError;
+extern boost::signals2::signal<void (ErrCmdType _err_type, int _err_code, const std::string& _ip, const std::string& _host, uint16_t _port)> SignalOnShortLinkNetworkError;
+    
 DEFINE_FIND_STATIC_METHOD(KC2Java_onTaskEnd, KC2Java, "onTaskEnd", "(ILjava/lang/Object;II)I")
-int OnTaskEnd(int32_t _taskid, void* const _user_context, int _error_type, int _error_code) {
+int (*OnTaskEnd)(uint32_t _taskid, void* const _user_context, int _error_type, int _error_code)
+= [](uint32_t _taskid, void* const _user_context, int _error_type, int _error_code) {
 
     xverbose_function();
 
@@ -45,13 +49,14 @@ int OnTaskEnd(int32_t _taskid, void* const _user_context, int _error_type, int _
 	ScopeJEnv scope_jenv(cache_instance->GetJvm());
 	JNIEnv *env = scope_jenv.GetEnv();
 
-	int ret = (int)JNU_CallStaticMethodByMethodInfo(env, KC2Java_onTaskEnd, (jint)_taskid, NULL, (jint)_error_type, (jint)_error_code).i;
+	int ret = (int)JNU_CallStaticMethodByMethodInfo(env, KC2Java_onTaskEnd, (jint)_taskid, _user_context, (jint)_error_type, (jint)_error_code).i;
 
 	return ret;
-}
+};
 
 DEFINE_FIND_STATIC_METHOD(KC2Java_onPush, KC2Java, "onPush", "(I[B)V")
-void OnPush(int _cmd, const AutoBuffer& _data) {
+void (*OnPush)(uint64_t _channel_id, uint32_t _cmdid, uint32_t _taskid, const AutoBuffer& _body, const AutoBuffer& _extend)
+= [](uint64_t _channel_id, uint32_t _cmdid, uint32_t _taskid, const AutoBuffer& _body, const AutoBuffer& _extend) {
 
     xverbose_function();
 
@@ -62,22 +67,23 @@ void OnPush(int _cmd, const AutoBuffer& _data) {
 
 	jbyteArray data_jba = NULL;
 
-	if (_data.Length() > 0) {
-		data_jba = JNU_Buffer2JbyteArray(env, _data);
+	if (_body.Length() > 0) {
+		data_jba = JNU_Buffer2JbyteArray(env, _body);
 	} else {
 		xdebug2(TSF"the data.Lenght() < = 0");
 	}
 
-	JNU_CallStaticMethodByMethodInfo(env, KC2Java_onPush, (jint)_cmd, data_jba);
+	JNU_CallStaticMethodByMethodInfo(env, KC2Java_onPush, (jint)_cmdid, data_jba);
 
 	if (data_jba != NULL) {
 		JNU_FreeJbyteArray(env, data_jba);
 	}
 
-}
+};
 
 DEFINE_FIND_STATIC_METHOD(KC2Java_onNewDns, KC2Java, "onNewDns", "(Ljava/lang/String;)[Ljava/lang/String;")
-WEAK_FUNC std::vector<std::string> OnNewDns(const std::string& _host)  {
+std::vector<std::string> (*OnNewDns)(const std::string& _host)
+= [](const std::string& _host) {
 	xverbose_function();
 
 	VarCache* cache_instance = VarCache::Singleton();
@@ -104,10 +110,11 @@ WEAK_FUNC std::vector<std::string> OnNewDns(const std::string& _host)  {
 	}
 
 	return iplist;
-}
+};
 
-DEFINE_FIND_STATIC_METHOD(KC2Java_req2Buf, KC2Java, "req2Buf", "(ILjava/lang/Object;Ljava/io/ByteArrayOutputStream;[II)Z")
-bool Req2Buf(int32_t _taskid,  void* const _user_context, AutoBuffer& _outbuffer, int& _error_code, const int _channel_select) {
+DEFINE_FIND_STATIC_METHOD(KC2Java_req2Buf, KC2Java, "req2Buf", "(ILjava/lang/Object;Ljava/io/ByteArrayOutputStream;[IILjava/lang/String;)Z")
+bool (*Req2Buf)(uint32_t _taskid,  void* const _user_context, AutoBuffer& _outbuffer,  AutoBuffer& _extend, int& _error_code, const int _channel_select, const std::string& _host)
+= [](uint32_t _taskid,  void* const _user_context, AutoBuffer& _outbuffer,  AutoBuffer& _extend, int& _error_code, const int _channel_select, const std::string& _host) -> bool {
 
     xverbose_function();
 
@@ -127,7 +134,7 @@ bool Req2Buf(int32_t _taskid,  void* const _user_context, AutoBuffer& _outbuffer
 
 	jintArray errcode_array = env->NewIntArray(2);
 
-	jboolean ret = JNU_CallStaticMethodByMethodInfo(env, KC2Java_req2Buf, (jint)_taskid, NULL, byte_array_output_stream_obj, errcode_array, _channel_select).z;
+	jboolean ret = JNU_CallStaticMethodByMethodInfo(env, KC2Java_req2Buf, (jint)_taskid, _user_context, byte_array_output_stream_obj, errcode_array, _channel_select, ScopedJstring(env, _host.c_str()).GetJstr()).z;
 
 	if (ret) {
 		jbyteArray ret_byte_array = (jbyteArray)JNU_CallMethodByName(env, byte_array_output_stream_obj, "toByteArray", "()[B").l;
@@ -149,10 +156,11 @@ bool Req2Buf(int32_t _taskid,  void* const _user_context, AutoBuffer& _outbuffer
 	env->DeleteLocalRef(errcode_array);
 
 	return ret;
-}
+};
 
 DEFINE_FIND_STATIC_METHOD(KC2Java_buf2Resp, KC2Java, "buf2Resp", "(ILjava/lang/Object;[B[II)I")
-WEAK_FUNC int Buf2Resp(int32_t _taskid, void* const _user_context, const AutoBuffer& _inbuffer, int& _error_code, const int _channel_select) {
+int (*Buf2Resp)(uint32_t _taskid, void* const _user_context, const AutoBuffer& _inbuffer, const AutoBuffer& _extend, int& _error_code, const int _channel_select)
+= [](uint32_t _taskid, void* const _user_context, const AutoBuffer& _inbuffer, const AutoBuffer& _extend, int& _error_code, const int _channel_select) {
 
     xverbose_function();
 
@@ -170,7 +178,7 @@ WEAK_FUNC int Buf2Resp(int32_t _taskid, void* const _user_context, const AutoBuf
 
 	jintArray errcode_array = env->NewIntArray(1);
 
-	jint ret = JNU_CallStaticMethodByMethodInfo(env, KC2Java_buf2Resp, (jint)_taskid, NULL, resp_buf_jba, errcode_array, _channel_select).i;
+	jint ret = JNU_CallStaticMethodByMethodInfo(env, KC2Java_buf2Resp, (jint)_taskid, _user_context, resp_buf_jba, errcode_array, _channel_select).i;
 
 	if (resp_buf_jba != NULL) {
 		env->DeleteLocalRef(resp_buf_jba);
@@ -182,24 +190,25 @@ WEAK_FUNC int Buf2Resp(int32_t _taskid, void* const _user_context, const AutoBuf
     env->DeleteLocalRef(errcode_array);
 
 	return ret;
-}
+};
 
-DEFINE_FIND_STATIC_METHOD(KC2Java_makesureAuthed, KC2Java, "makesureAuthed", "()Z")
-bool MakesureAuthed() {
+DEFINE_FIND_STATIC_METHOD(KC2Java_makesureAuthed, KC2Java, "makesureAuthed", "(Ljava/lang/String;)Z")
+bool (*MakesureAuthed)(const std::string& _host)
+= [](const std::string& _host) -> bool {
     xverbose_function();
 
     VarCache* cache_instance = VarCache::Singleton();
 	ScopeJEnv scope_jenv(cache_instance->GetJvm());
 	JNIEnv *env = scope_jenv.GetEnv();
 
-	jboolean ret = JNU_CallStaticMethodByMethodInfo(env, KC2Java_makesureAuthed).z;
+	jboolean ret = JNU_CallStaticMethodByMethodInfo(env, KC2Java_makesureAuthed, ScopedJstring(env, _host.c_str()).GetJstr()).z;
 
 	return ret;
-}
+};
 
 DEFINE_FIND_STATIC_METHOD(KC2Java_getLongLinkIdentifyCheckBuffer, KC2Java, "getLongLinkIdentifyCheckBuffer", "(Ljava/io/ByteArrayOutputStream;Ljava/io/ByteArrayOutputStream;[I)I")
-int GetLonglinkIdentifyCheckBuffer(AutoBuffer& _identify_buffer, AutoBuffer& _buffer_hash, int32_t& _cmdid)
-{
+int (*GetLonglinkIdentifyCheckBuffer)(AutoBuffer& _identify_buffer, AutoBuffer& _buffer_hash, int32_t& _cmdid)
+= [](AutoBuffer& _identify_buffer, AutoBuffer& _buffer_hash, int32_t& _cmdid) {
     xverbose_function();
     
     VarCache* cache_instance = VarCache::Singleton();
@@ -265,11 +274,11 @@ int GetLonglinkIdentifyCheckBuffer(AutoBuffer& _identify_buffer, AutoBuffer& _bu
 	env->DeleteLocalRef(byte_array_outputstream_hash);
 
 	return ret;
-}
+};
 
 DEFINE_FIND_STATIC_METHOD(KC2Java_onLongLinkIdentifyResp, KC2Java, "onLongLinkIdentifyResp", "([B[B)Z")
-bool OnLonglinkIdentifyResponse(const AutoBuffer& _response_buffer, const AutoBuffer& _identify_buffer_hash)
-{
+bool (*OnLonglinkIdentifyResponse)(const AutoBuffer& _response_buffer, const AutoBuffer& _identify_buffer_hash)
+= [](const AutoBuffer& _response_buffer, const AutoBuffer& _identify_buffer_hash) {
     xverbose_function();
 
 	VarCache* cache_instance = VarCache::Singleton();
@@ -303,33 +312,24 @@ bool OnLonglinkIdentifyResponse(const AutoBuffer& _response_buffer, const AutoBu
 	}
 
     return ret != 0;
-}
+};
 
-WEAK_FUNC void TrafficData(ssize_t _send, ssize_t _recv) {
-	int net_info = getNetInfo();
-		
-	if (kWifi == net_info) {
-		ReportFlow(_recv, _send, 0, 0);
-	}else if (kMobile == net_info) {
-		ReportFlow(0, 0, _recv, _send);
-	} else {
-	
-	}
-}
 
-DEFINE_FIND_STATIC_METHOD(KC2Java_reportFlowData, KC2Java, "reportFlow", "(IIII)V")
-void ReportFlow(const int _wifi_recv_data_size, const int _wifi_send_data_size, int _mobile_recv_data_size, int _mobile_send_data_size) {
-	xverbose2(TSF"wifiRecvDataSize:%0, wifiSendDataSize:%1, mobileRecvDataSize:%2, mobileSendDataSize:%3", _wifi_recv_data_size, _wifi_send_data_size, _mobile_recv_data_size, _mobile_send_data_size);
+DEFINE_FIND_STATIC_METHOD(KC2Java_trafficData, KC2Java, "trafficData", "(II)V")
+void (*TrafficData)(ssize_t _send, ssize_t _recv) 
+= [](ssize_t _send, ssize_t _recv) {
 
 	VarCache* cache_instance = VarCache::Singleton();
 	ScopeJEnv scope_jenv(cache_instance->GetJvm());
 	JNIEnv *env = scope_jenv.GetEnv();
 
-	JNU_CallStaticMethodByMethodInfo(env, KC2Java_reportFlowData, (jint)_wifi_recv_data_size, (jint)_wifi_send_data_size, (jint)_mobile_recv_data_size, (jint)_mobile_send_data_size);
-}
+	JNU_CallStaticMethodByMethodInfo(env, KC2Java_trafficData, (jint)_send, (jint)_recv);
+
+};
 
 DEFINE_FIND_STATIC_METHOD(KC2Java_reportNetConnectInfo, KC2Java, "reportConnectStatus", "(II)V")
-void ReportConnectStatus(int _all_connstatus, int _longlink_connstatus) {
+void (*ReportConnectStatus)(int _all_connstatus, int _longlink_connstatus)
+= [](int _all_connstatus, int _longlink_connstatus) {
     xverbose_function();
 
     VarCache* cache_instance = VarCache::Singleton();
@@ -337,7 +337,7 @@ void ReportConnectStatus(int _all_connstatus, int _longlink_connstatus) {
     JNIEnv *env = scope_jenv.GetEnv();
     JNU_CallStaticMethodByMethodInfo(env, KC2Java_reportNetConnectInfo, (jint)_all_connstatus, (jint)_longlink_connstatus);
     xdebug2(TSF"all_connstatus = %0, longlink_connstatus = %_", _all_connstatus, _longlink_connstatus);
-}
+};
 
 //DEFINE_FIND_STATIC_METHOD(KC2Java_reportCrashStatistics, KC2Java, "reportCrashStatistics", "(Ljava/lang/String;Ljava/lang/String;)V")
 void reportCrashStatistics(const char* _raw, const char* _type)
@@ -345,7 +345,8 @@ void reportCrashStatistics(const char* _raw, const char* _type)
 }
 
 DEFINE_FIND_STATIC_METHOD(KC2Java_requestSync, KC2Java, "requestDoSync", "()V")
-void RequestSync() {
+void (*RequestSync)()
+= []() {
     xverbose_function();
 
     VarCache* cache_instance = VarCache::Singleton();
@@ -353,20 +354,11 @@ void RequestSync() {
     JNIEnv *env = scope_jenv.GetEnv();
     JNU_CallStaticMethodByMethodInfo(env, KC2Java_requestSync);
 
-}
-
-DEFINE_FIND_STATIC_METHOD(KC2Java_isLogoned, KC2Java, "isLogoned", "()Z")
-bool IsLogoned() {
-    xverbose_function();
-
-    VarCache* cache_instance = VarCache::Singleton();
-    ScopeJEnv scope_jenv(cache_instance->GetJvm());
-    JNIEnv *env = scope_jenv.GetEnv();
-    return JNU_CallStaticMethodByMethodInfo(env, KC2Java_isLogoned).z;
-}
+};
 
 DEFINE_FIND_STATIC_METHOD(KC2Java_requestNetCheckShortLinkHosts, KC2Java, "requestNetCheckShortLinkHosts", "()[Ljava/lang/String;")
-WEAK_FUNC void RequestNetCheckShortLinkHosts(std::vector<std::string>& _hostlist) {
+void (*RequestNetCheckShortLinkHosts)(std::vector<std::string>& _hostlist)
+= [](std::vector<std::string>& _hostlist) {
 	xverbose_function();
 
 	VarCache* cache_instance = VarCache::Singleton();
@@ -387,17 +379,18 @@ WEAK_FUNC void RequestNetCheckShortLinkHosts(std::vector<std::string>& _hostlist
 
 		env->DeleteLocalRef(jobj_arr);
 	}
-}
+};
 
 DEFINE_FIND_STATIC_METHOD(KC2Java_reportTaskProfile, KC2Java, "reportTaskProfile", "(Ljava/lang/String;)V")
-WEAK_FUNC void ReportTaskProfile(const TaskProfile& _task_profile) {
+void (*ReportTaskProfile)(const TaskProfile& _task_profile)
+= [](const TaskProfile& _task_profile) {
 	xverbose_function();
 
 	VarCache* cache_instance = VarCache::Singleton();
 	ScopeJEnv scope_jenv(cache_instance->GetJvm());
 	JNIEnv *env = scope_jenv.GetEnv();
 
-	std::stringstream profile_json;
+	XMessage profile_json;
 	profile_json << "{";
 	profile_json << "\"taskId\":" << _task_profile.task.taskid;
 	profile_json << ",\"cmdId\":" << _task_profile.task.cmdid;
@@ -436,19 +429,33 @@ WEAK_FUNC void ReportTaskProfile(const TaskProfile& _task_profile) {
 		}
 	}
 	profile_json << "]}";
-	std::string report_task_str = profile_json.str();
+	std::string report_task_str = profile_json.String();
 
 	JNU_CallStaticMethodByMethodInfo(env, KC2Java_reportTaskProfile, ScopedJstring(env, report_task_str.c_str()).GetJstr());
-}
+};
 
-WEAK_FUNC void ReportTaskLimited(int _check_type, const Task& _task, unsigned int& _param) {
+void (*ReportTaskLimited)(int _check_type, const Task& _task, unsigned int& _param)
+= [](int _check_type, const Task& _task, unsigned int& _param) {
 
-}
+};
 
-WEAK_FUNC void ReportDnsProfile(const DnsProfile& _dns_profile) {
+void (*ReportDnsProfile)(const DnsProfile& _dns_profile)
+= [](const DnsProfile& _dns_profile) {
+};
 
-}
+void (*OnLongLinkNetworkError)(ErrCmdType _err_type, int _err_code, const std::string& _ip, uint16_t _port)
+= [](ErrCmdType _err_type, int _err_code, const std::string& _ip, uint16_t _port) {
+    SignalOnLongLinkNetworkError(_err_type, _err_code, _ip, _port);
+};
+    
+void (*OnShortLinkNetworkError)(ErrCmdType _err_type, int _err_code, const std::string& _ip, const std::string& _host, uint16_t _port)
+= [](ErrCmdType _err_type, int _err_code, const std::string& _ip, const std::string& _host, uint16_t _port) {
+    SignalOnShortLinkNetworkError(_err_type, _err_code, _ip, _host, _port);
+};
+void (*OnLongLinkStatusChange)(int _status)
+= [](int _status) {
 
+};
 }
 }
 

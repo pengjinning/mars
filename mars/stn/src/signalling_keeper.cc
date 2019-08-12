@@ -35,8 +35,6 @@ using namespace mars::stn;
 static unsigned int g_period = 5 * 1000;  // ms
 static unsigned int g_keepTime = 20 *1000;  // ms
 
-static const unsigned int kSignallingCmdId = 243;
-
 
 SignallingKeeper::SignallingKeeper(const LongLink& _longlink, MessageQueue::MessageQueue_t _messagequeue_id, bool _use_UDP)
 :msgreg_(MessageQueue::InstallAsyncHandler(_messagequeue_id))
@@ -47,7 +45,7 @@ SignallingKeeper::SignallingKeeper(const LongLink& _longlink, MessageQueue::Mess
 , udp_client_(ip_, port_, this)
 , use_UDP_(_use_UDP)
 {
-    xinfo2(TSF"SignallingKeeper messagequeue_id=%_", MessageQueue::Handler2Queue(msgreg_.Get()));
+    xinfo2(TSF"SignallingKeeper messagequeue_id=%_, handler:(%_,%_)", MessageQueue::Handler2Queue(msgreg_.Get()), msgreg_.Get().queue, msgreg_.Get().seq);
 }
 
 SignallingKeeper::~SignallingKeeper()
@@ -87,7 +85,7 @@ void SignallingKeeper::OnNetWorkDataChanged(const char*, ssize_t, ssize_t)
         MessageQueue::CancelMessage(postid_);
     }
     
-    postid_ = MessageQueue::AsyncInvokeAfter(g_period, boost::bind(&SignallingKeeper::__OnTimeOut, this), msgreg_.Get());
+    postid_ = MessageQueue::AsyncInvokeAfter(g_period, boost::bind(&SignallingKeeper::__OnTimeOut, this), msgreg_.Get(), "SignallingKeeper::__OnTimeOut");
 }
 
 
@@ -132,13 +130,13 @@ void SignallingKeeper::__SendSignallingBuffer()
         {
             udp_client_.SetIpPort(ip_, port_);
             AutoBuffer buffer;
-            longlink_pack(kSignallingCmdId, 0, NULL, 0, buffer);
+            longlink_pack(signal_keep_cmdid(), 0, KNullAtuoBuffer, KNullAtuoBuffer, buffer, NULL);
             udp_client_.SendAsync(buffer.Ptr(), buffer.Length());
         }
     } else {
         if (fun_send_signalling_buffer_)
         {
-            fun_send_signalling_buffer_(NULL, 0, kSignallingCmdId);
+            fun_send_signalling_buffer_(KNullAtuoBuffer, KNullAtuoBuffer, signal_keep_cmdid());
         }
     }
 }

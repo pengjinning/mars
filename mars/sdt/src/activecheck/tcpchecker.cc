@@ -27,8 +27,8 @@
 #include "mars/stn/proto/longlink_packer.h"
 #include "mars/sdt/constants.h"
 
-#include "checkimpl/tcpquery.h"
-#include "netchecker_socketutils.hpp"
+#include "sdt/src/checkimpl/tcpquery.h"
+#include "sdt/src/tools/netchecker_socketutils.hpp"
 
 using namespace mars::sdt;
 using namespace mars::stn;
@@ -46,10 +46,6 @@ int TcpChecker::StartDoCheck(CheckRequestProfile& _check_request) {
     return BaseChecker::StartDoCheck(_check_request);
 }
 
-int TcpChecker::CancelDoCheck() {
-    xinfo_function();
-    return BaseChecker::CancelDoCheck();
-}
 
 void TcpChecker::__DoCheck(CheckRequestProfile& _check_request) {
     xinfo_function();
@@ -57,6 +53,10 @@ void TcpChecker::__DoCheck(CheckRequestProfile& _check_request) {
     for (CheckIPPorts_Iterator iter = _check_request.longlink_items.begin(); iter != _check_request.longlink_items.end(); ++iter) {
     	std::string host = iter->first;
     	for (std::vector<CheckIPPort>::iterator ipport = iter->second.begin(); ipport != iter->second.end(); ++ipport) {
+            if (is_canceled_) {
+                xinfo2(TSF"TcpChecker is canceled.");
+                return;
+            }
     		CheckResultProfile profile;
 			profile.netcheck_type = kTcpCheck;
     		profile.ip = (*ipport).ip;
@@ -120,15 +120,17 @@ void TcpChecker::__DoCheck(CheckRequestProfile& _check_request) {
 
 void TcpChecker::__NoopReq(AutoBuffer& _noop_send) {
 	AutoBuffer noop_body;
-	longlink_noop_req_body(noop_body);
-	longlink_pack(longlink_noop_cmdid(), getNoopTaskID(), noop_body.Ptr(), noop_body.Length(), _noop_send);
+	AutoBuffer noop_extension;
+	longlink_noop_req_body(noop_body, noop_extension);
+	longlink_pack(longlink_noop_cmdid(), Task::kNoopTaskID, noop_body, noop_extension, _noop_send, NULL);
 }
 
 bool TcpChecker::__NoopResp(const AutoBuffer& _packed, uint32_t& _cmdid, uint32_t& _seq, size_t& _package_len, AutoBuffer& _body) {
-	int unpackret = longlink_unpack(_packed, _cmdid, _seq, _package_len, _body);
+    AutoBuffer extension;
+	int unpackret = longlink_unpack(_packed, _cmdid, _seq, _package_len, _body, extension, NULL);
 	if (unpackret == LONGLINK_UNPACK_OK) {
-		if (_cmdid == longlink_noop_resp_cmdid() && _seq == getNoopTaskID()) {
-			longlink_noop_resp_body(_body);
+        if (longlink_noop_isresp(Task::kNoopTaskID, _cmdid, _seq, _body, extension)) {
+			longlink_noop_resp_body(_body, extension);
 			return true;
 		}
 	}

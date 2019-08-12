@@ -23,14 +23,14 @@
 
 #include <string>
 #include <map>
+#include <list>
 
 #include "autobuffer.h"
 
 namespace http {
 
 struct less {
-    bool operator()(const std::string& __x, const std::string& __y) const
-    { return 0 > strcasecmp(__x.c_str(), __y.c_str()); }
+	bool operator()(const std::string& __x, const std::string& __y) const;
 };
 
 enum THttpVersion {
@@ -135,6 +135,7 @@ class HeaderFields {
     static std::pair<const std::string, std::string> MakeConnectionKeepalive();
     static std::pair<const std::string, std::string> MakeAcceptAll();
     static std::pair<const std::string, std::string> MakeAcceptEncodingDefalte();
+    static std::pair<const std::string, std::string> MakeAcceptEncodingGzip();
     static std::pair<const std::string, std::string> MakeCacheControlNoCache();
     static std::pair<const std::string, std::string> MakeContentTypeOctetStream();
 
@@ -143,6 +144,8 @@ class HeaderFields {
     static const char* const KStringUserAgent;
     static const char* const KStringCacheControl;
     static const char* const KStringConnection;
+    static const char* const kStringProxyConnection;
+    static const char* const kStringProxyAuthorization;
     static const char* const KStringContentType;
     static const char* const KStringContentLength;
     static const char* const KStringTransferEncoding;
@@ -153,19 +156,24 @@ class HeaderFields {
     static const char* const KStringRange;
     static const char* const KStringLocation;
     static const char* const KStringReferer;
+    static const char* const kStringServer;
 
     void HeaderFiled(const char* _name, const char* _value);
     void HeaderFiled(const std::pair<const std::string, std::string>& _headerfield);
+    void InsertOrUpdate(const std::pair<const std::string, std::string>& _headerfield);
     void HeaderFiled(const HeaderFields& _headerfields);
     const char* HeaderField(const char* _key) const;
     std::map<const std::string, std::string, less>& GetHeaders() {return headers_;}
+    std::list<std::pair<const std::string, const std::string>> GetAsList() const;
 
-    bool IsTransferEncodingChunked();
-    int ContentLength();
+    bool IsTransferEncodingChunked() const;
+    bool IsConnectionClose() const;
+    int64_t ContentLength() const ;
 
-    bool ContentRange(int* start, int* end, int* total);
+    bool Range(long& _start, long& _end) const;
+    bool ContentRange(int64_t* start, int64_t* end, int64_t* total) const;
 
-    const std::string ToStrig() const;
+    const std::string ToString() const;
 
   private:
     std::map<const std::string, std::string, less> headers_;
@@ -183,10 +191,10 @@ class IBlockBodyProvider {
 class BufferBodyProvider : public IBlockBodyProvider {
   public:
     bool Data(AutoBuffer& _body) {
-        if (!buffer_.Ptr()) return false;
-
-        _body.Write(buffer_.Ptr(), buffer_.Length());
-        buffer_.Reset();
+        if (!_body.Ptr()) return false;
+        
+        buffer_.Write(_body.Ptr(), _body.Length());
+        _body.Reset();
         return true;
     }
     bool FillData(AutoBuffer& _body) {
@@ -307,7 +315,7 @@ class Parser {
     Parser& operator=(const Parser&);
 
   public:
-    TRecvStatus Recv(const void* _buffer, size_t _length);
+    TRecvStatus Recv(const void* _buffer, size_t _length, size_t* consumed_bytes = nullptr);
     TRecvStatus Recv(AutoBuffer& _recv_buffer);
     TRecvStatus RecvStatus() const;
 
@@ -315,10 +323,12 @@ class Parser {
     bool FirstLineReady() const;
     const RequestLine& Request() const;
     const StatusLine& Status() const;
+    const AutoBuffer& HeaderBuffer() const;
 
     bool FieldsReady() const;
     HeaderFields& Fields();
     const HeaderFields& Fields() const;
+    size_t FirstLineLength() const;
     size_t HeaderLength() const;
 
     bool BodyReady() const;
@@ -331,7 +341,9 @@ class Parser {
 
   private:
     TRecvStatus recvstatus_;
-    AutoBuffer    recvbuf_;
+    AutoBuffer  recvbuf_;
+    AutoBuffer  headerbuf_;
+    bool response_header_ready_;
     TCsMode csmode_;
 
     StatusLine statusline_;
@@ -341,6 +353,7 @@ class Parser {
 
     BodyReceiver* bodyreceiver_;
     bool is_manage_body_;
+    size_t firstlinelength_;
     size_t headerlength_;
 };
 

@@ -74,14 +74,27 @@ void AutoBuffer::AddCapacity(size_t _len) {
     __FitSize(Capacity() + _len);
 }
 
+void AutoBuffer::Write(const AutoBuffer& _buffer) {
+    Write(_buffer.Ptr(), _buffer.Length());
+}
+
 void AutoBuffer::Write(const void* _pbuffer, size_t _len) {
     Write(Pos(), _pbuffer, _len);
     Seek(_len, ESeekCur);
 }
 
+void AutoBuffer::Write(off_t& _pos, const AutoBuffer& _buffer) {
+    Write((const off_t&) _pos, _buffer.Ptr(), _buffer.Length());
+    _pos += _buffer.Length();
+}
+
 void AutoBuffer::Write(off_t& _pos, const void* _pbuffer, size_t _len) {
     Write((const off_t&) _pos,  _pbuffer,  _len);
     _pos += _len;
+}
+
+void AutoBuffer::Write(const off_t& _pos, const AutoBuffer& _buffer) {
+    Write((const off_t&) _pos, _buffer.Ptr(), _buffer.Length());
 }
 
 void AutoBuffer::Write(const off_t& _pos, const void* _pbuffer, size_t _len) {
@@ -287,14 +300,18 @@ void AutoBuffer::__FitSize(size_t _len) {
         void* p = realloc(parray_, mallocsize);
 
         if (NULL == p) {
-            ASSERT2(p, "_len=%" PRIu64 ", m_nMallocUnitSize=%" PRIu64 ", nMallocSize=%" PRIu64", m_nCapacity=%" PRIu64,
-                    (uint64_t)_len, (uint64_t)malloc_unitsize_, (uint64_t)mallocsize, (uint64_t)capacity_);
+		ASSERT2(p, "_len=%" PRIu64 ", m_nMallocUnitSize=%" PRIu64 ", nMallocSize=%" PRIu64", m_nCapacity=%" PRIu64,
+				(uint64_t)_len, (uint64_t)malloc_unitsize_, (uint64_t)mallocsize, (uint64_t)capacity_);
+
             free(parray_);
+            parray_ = NULL;
+            capacity_ = 0;
+            return;
         }
 
         parray_ = (unsigned char*) p;
 
-        ASSERT2(_len <= 10 * 1024 * 1024, "%u", (uint32_t)_len);
+        ASSERT2(_len <= 20 * 1024 * 1024, "%u", (uint32_t)_len);
         ASSERT(parray_);
         
         memset(parray_+capacity_, 0, mallocsize-capacity_);

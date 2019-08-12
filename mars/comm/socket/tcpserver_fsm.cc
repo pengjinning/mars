@@ -26,19 +26,19 @@
 #include "comm/socket/tcpserver_fsm.h"
 
 TcpServerFSM::TcpServerFSM(SOCKET _socket)
-    : status_(kAccept), sock_(_socket) {
+    : status_(kAccept), sock_(_socket), is_write_fd_set_(false) {
     xassert2(INVALID_SOCKET != sock_);
     socklen_t addr_len = sizeof(addr_);
     xerror2_if(0 > getpeername(sock_, (sockaddr*)&addr_, &addr_len), TSF"getpeername:%_, %_", socket_errno, socket_strerror(socket_errno));
 
     memset(ip_, 0, sizeof(ip_));
-    inet_ntop(addr_.sin_family, &(addr_.sin_addr), ip_, sizeof(ip_));
+	socket_inet_ntop(addr_.sin_family, &(addr_.sin_addr), ip_, sizeof(ip_));
 }
 
 TcpServerFSM::TcpServerFSM(SOCKET _socket, const sockaddr_in& _addr)
-    : status_(kAccept), sock_(_socket), addr_(_addr) {
+    : status_(kAccept), sock_(_socket), addr_(_addr) , is_write_fd_set_(false){
     memset(ip_, 0, sizeof(ip_));
-    inet_ntop(addr_.sin_family, &(addr_.sin_addr), ip_, sizeof(ip_));
+	socket_inet_ntop(addr_.sin_family, &(addr_.sin_addr), ip_, sizeof(ip_));
 }
 
 TcpServerFSM::~TcpServerFSM() {
@@ -120,7 +120,12 @@ TcpServerFSM::TSocketStatus TcpServerFSM::PreReadWriteSelect(SocketSelect& _sel,
     _sel.Read_FD_SET(sock_);
     _sel.Exception_FD_SET(sock_);
 
-    if (0 < send_buf_.Length())_sel.Write_FD_SET(sock_);
+    if (0 < send_buf_.Length()) {
+    	WriteFDSet(true);
+    	_sel.Write_FD_SET(sock_);
+    } else {
+    	WriteFDSet(false);
+    }
 
     return status_;
 }

@@ -18,6 +18,7 @@ xcshareddata
 !/mars/boost/libs/
 /samples/iOS/iOSDemo/Kernel/MarsLib/
 /samples/iOS/iOSDemoXlog/Kernel/MarsLib/
+/samples/iOS/XloggerSwiftDemo/Kernel/MarsLib/
 /samples/Mac/Kernel/MarsLib/
 /samples/android/xlogSample/app/src/main/jni/export_include/*.so
 
@@ -88,3 +89,29 @@ xcshareddata
 .autotools
 .cproject
 .project
+*.lib
+*.pdb
+mars/win32proj/Debug/mars.lastbuildstate
+mars/win32proj/Debug/mars.unsuccessfulbuild
+
+
+# cmake
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+.vs
+mars/*/Win32/Debug
+mars/Win32/Debug
+*.dir
+*.out
+Debug-iphonesimulator
+*.xcodeproj
+*.build
+cmake_build
+*.settings

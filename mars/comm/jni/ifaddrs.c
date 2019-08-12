@@ -1,26 +1,24 @@
 /*
-Copyright (c) 2013, Kenneth MacKay
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without modification,
-are permitted provided that the following conditions are met:
+ Copyright (c) 2013, Kenneth MacKay
+ All rights reserved.
+ Redistribution and use in source and binary forms, with or without modification,
+ are permitted provided that the following conditions are met:
  * Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer.
+ list of conditions and the following disclaimer.
  * Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
-ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/
+ this list of conditions and the following disclaimer in the documentation
+ and/or other materials provided with the distribution.
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
 
 #include "ifaddrs.h"
 
@@ -35,7 +33,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <netinet/in.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
-
+#include "mars/comm/assert/__assert.h"
 typedef struct NetlinkList
 {
     struct NetlinkList *m_next;
@@ -65,25 +63,22 @@ static int netlink_socket(void)
 
 static int netlink_send(int p_socket, int p_request)
 {
-    struct
-    {
-        struct nlmsghdr m_hdr;
-        struct rtgenmsg m_msg;
-    } l_data;
-
-    memset(&l_data, 0, sizeof(l_data));
+    char l_buffer[NLMSG_ALIGN(sizeof(struct nlmsghdr)) + NLMSG_ALIGN(sizeof(struct rtgenmsg))];
+    memset(l_buffer, 0, sizeof(l_buffer));
+    struct nlmsghdr *l_hdr = (struct nlmsghdr *)l_buffer;
+    struct rtgenmsg *l_msg = (struct rtgenmsg *)NLMSG_DATA(l_hdr);
     
-    l_data.m_hdr.nlmsg_len = NLMSG_LENGTH(sizeof(struct rtgenmsg));
-    l_data.m_hdr.nlmsg_type = p_request;
-    l_data.m_hdr.nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST;
-    l_data.m_hdr.nlmsg_pid = 0;
-    l_data.m_hdr.nlmsg_seq = p_socket;
-    l_data.m_msg.rtgen_family = AF_UNSPEC;
+    l_hdr->nlmsg_len = NLMSG_LENGTH(sizeof(*l_msg));
+    l_hdr->nlmsg_type = p_request;
+    l_hdr->nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST;
+    l_hdr->nlmsg_pid = 0;
+    l_hdr->nlmsg_seq = p_socket;
+    l_msg->rtgen_family = AF_UNSPEC;
     
     struct sockaddr_nl l_addr;
     memset(&l_addr, 0, sizeof(l_addr));
     l_addr.nl_family = AF_NETLINK;
-    return (sendto(p_socket, &l_data.m_hdr, l_data.m_hdr.nlmsg_len, 0, (struct sockaddr *)&l_addr, sizeof(l_addr)));
+    return (sendto(p_socket, l_hdr, l_hdr->nlmsg_len, 0, (struct sockaddr *)&l_addr, sizeof(l_addr)));
 }
 
 static int netlink_recv(int p_socket, void *p_buffer, size_t p_len)
@@ -91,7 +86,7 @@ static int netlink_recv(int p_socket, void *p_buffer, size_t p_len)
     struct msghdr l_msg;
     struct iovec l_iov = { p_buffer, p_len };
     struct sockaddr_nl l_addr;
-
+    
     for(;;)
     {
         l_msg.msg_name = (void *)&l_addr;
@@ -143,12 +138,21 @@ static struct nlmsghdr *getNetlinkResponse(int p_socket, int *p_size, int *p_don
         }
         if(l_read >= 0)
         {
-            pid_t l_pid = getpid();
+            struct sockaddr_nl local_addr;
+            memset(&local_addr, 0, sizeof(local_addr));
+            socklen_t addr_len = sizeof(local_addr);
+            if (getsockname(p_socket, (struct sockaddr*)&local_addr, &addr_len) < 0) {
+                ASSERT2(0, "cannot getsockname line:%d", __LINE__);
+                free(l_buffer);
+                return NULL;
+            }
+            pid_t l_pid = local_addr.nl_pid;
             struct nlmsghdr *l_hdr;
             for(l_hdr = (struct nlmsghdr *)l_buffer; NLMSG_OK(l_hdr, (unsigned int)l_read); l_hdr = (struct nlmsghdr *)NLMSG_NEXT(l_hdr, l_read))
             {
                 if((pid_t)l_hdr->nlmsg_pid != l_pid || (int)l_hdr->nlmsg_seq != p_socket)
                 {
+                    ASSERT2(0, "l_pid:%d, nlmsg_pid:%d, p_socket:%d, nlmsg_seq:%d", l_pid, (pid_t)l_hdr->nlmsg_pid, p_socket, (int)l_hdr->nlmsg_seq);
                     continue;
                 }
                 
@@ -203,7 +207,7 @@ static NetlinkList *getResultList(int p_socket, int p_request)
     {
         return NULL;
     }
-
+    
     NetlinkList *l_list = NULL;
     NetlinkList *l_end = NULL;
     int l_size;
@@ -437,6 +441,8 @@ static int interpretAddr(struct nlmsghdr *p_hdr, struct ifaddrs **p_resultList, 
                     l_addrSize += NLMSG_ALIGN(calcAddrLen(l_info->ifa_family, l_rtaDataSize));
                     l_addedNetmask = 1;
                 }
+                l_addrSize += NLMSG_ALIGN(calcAddrLen(l_info->ifa_family, l_rtaDataSize));
+                break;
             case IFA_BROADCAST:
                 l_addrSize += NLMSG_ALIGN(calcAddrLen(l_info->ifa_family, l_rtaDataSize));
                 break;
@@ -548,7 +554,14 @@ static int interpretAddr(struct nlmsghdr *p_hdr, struct ifaddrs **p_resultList, 
 static int interpretLinks(int p_socket, NetlinkList *p_netlinkList, struct ifaddrs **p_resultList)
 {
     int l_numLinks = 0;
-    pid_t l_pid = getpid();
+	struct sockaddr_nl local_addr;
+	memset(&local_addr, 0, sizeof(local_addr));
+	socklen_t addr_len = sizeof(local_addr);
+	if (getsockname(p_socket, (struct sockaddr*)&local_addr, &addr_len) < 0) {
+		ASSERT2(0, "cannot getsockname line:%d", __LINE__);
+		return -1;
+	}
+	pid_t l_pid = local_addr.nl_pid;
     for(; p_netlinkList; p_netlinkList = p_netlinkList->m_next)
     {
         unsigned int l_nlsize = p_netlinkList->m_size;
@@ -557,6 +570,7 @@ static int interpretLinks(int p_socket, NetlinkList *p_netlinkList, struct ifadd
         {
             if((pid_t)l_hdr->nlmsg_pid != l_pid || (int)l_hdr->nlmsg_seq != p_socket)
             {
+                ASSERT2(0, "l_pid:%d, nlmsg_pid:%d, p_socket:%d, nlmsg_seq:%d", l_pid, (pid_t)l_hdr->nlmsg_pid, p_socket, (int)l_hdr->nlmsg_seq);
                 continue;
             }
             
@@ -580,7 +594,14 @@ static int interpretLinks(int p_socket, NetlinkList *p_netlinkList, struct ifadd
 
 static int interpretAddrs(int p_socket, NetlinkList *p_netlinkList, struct ifaddrs **p_resultList, int p_numLinks)
 {
-    pid_t l_pid = getpid();
+	struct sockaddr_nl local_addr;
+	memset(&local_addr, 0, sizeof(local_addr));
+	socklen_t addr_len = sizeof(local_addr);
+	if (getsockname(p_socket, (struct sockaddr*)&local_addr, &addr_len) < 0) {
+	    ASSERT2(0, "cannot getsockname line:%d", __LINE__);
+	    return -1;
+	}
+	pid_t l_pid = local_addr.nl_pid;
     for(; p_netlinkList; p_netlinkList = p_netlinkList->m_next)
     {
         unsigned int l_nlsize = p_netlinkList->m_size;
@@ -589,6 +610,7 @@ static int interpretAddrs(int p_socket, NetlinkList *p_netlinkList, struct ifadd
         {
             if((pid_t)l_hdr->nlmsg_pid != l_pid || (int)l_hdr->nlmsg_seq != p_socket)
             {
+                ASSERT2(0, "l_pid:%d, nlmsg_pid:%d, p_socket:%d, nlmsg_seq:%d", l_pid, (pid_t)l_hdr->nlmsg_pid, p_socket, (int)l_hdr->nlmsg_seq);
                 continue;
             }
             
